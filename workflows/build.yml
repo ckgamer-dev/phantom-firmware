@@ -1,0 +1,82 @@
+name: Build PHANTOM Firmware
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:  # Manuell startbar mit einem Klick
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout PHANTOM patches
+      uses: actions/checkout@v4
+
+    - name: Clone Unleashed Firmware
+      run: |
+        git clone --depth=1 \
+          https://github.com/DarkFlippers/unleashed-firmware \
+          phantom-fw
+        cd phantom-fw
+        git submodule update --init --depth=1 \
+          lib/FreeRTOS-Kernel \
+          lib/heatshrink \
+          lib/mlib \
+          lib/nanopb \
+          lib/stm32wb_cmsis \
+          lib/stm32wb_hal \
+          lib/stm32wb_copro \
+          lib/mbedtls \
+          lib/libusb_stm32 \
+          lib/microtar \
+          assets/protobuf \
+          applications/main/subghz_remote
+
+    - name: Install build tools
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq \
+          gcc-arm-none-eabi binutils-arm-none-eabi \
+          python3 python3-pip protobuf-compiler
+        sudo ln -sf /usr/bin/gdb-multiarch /usr/local/bin/arm-none-eabi-gdb || true
+        sudo ln -sf /usr/bin/gdb-multiarch /usr/local/bin/arm-none-eabi-gdb-py3 || true
+        pip3 install --quiet \
+          scons heatshrink2 pyserial pyelftools \
+          protobuf Pillow ansi colorlog oslex \
+          cxxheaderparser "setuptools<70"
+
+    - name: Apply PHANTOM patches
+      run: |
+        cd phantom-fw
+        
+        # fbt_options.py
+        sed -i 's/FIRMWARE_ORIGIN = "Unleashed"/FIRMWARE_ORIGIN = "PHANTOM"/' fbt_options.py
+        sed -i 's/DIST_SUFFIX = "local"/DIST_SUFFIX = "phantom-v0.1.0"/' fbt_options.py
+        
+        # about.c
+        cp ../patches/about.c applications/settings/about/about.c
+        
+        # SubGHz Frequenzen
+        mkdir -p applications/main/subghz/resources/subghz/assets
+        cp ../patches/setting_user \
+           applications/main/subghz/resources/subghz/assets/setting_user
+        
+        # PHANTOM Ghost Animationen + Splash generieren
+        python3 ../patches/generate_animations.py
+        
+        echo "All PHANTOM patches applied!"
+
+    - name: Build PHANTOM Firmware
+      run: |
+        cd phantom-fw
+        bash fbt COMPACT=1 DEBUG=0 \
+          DIST_SUFFIX=phantom-v0.1.0 \
+          updater_package
+
+    - name: Upload PHANTOM Firmware
+      uses: actions/upload-artifact@v4
+      with:
+        name: PHANTOM-Firmware-v0.1.0
+        path: phantom-fw/dist/**/*.tgz
+        retention-days: 30
