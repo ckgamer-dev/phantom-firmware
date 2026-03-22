@@ -1,0 +1,37 @@
+name: Build PHANTOM Firmware
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Clone Unleashed
+      run: |
+        git clone --depth=1 https://github.com/DarkFlippers/unleashed-firmware phantom-fw
+        cd phantom-fw
+        git submodule update --init --depth=1 lib/FreeRTOS-Kernel lib/heatshrink lib/mlib lib/nanopb lib/stm32wb_cmsis lib/stm32wb_hal lib/stm32wb_copro lib/mbedtls lib/libusb_stm32 lib/microtar assets/protobuf applications/main/subghz_remote
+    - name: Install tools
+      run: |
+        sudo apt-get install -y gcc-arm-none-eabi binutils-arm-none-eabi python3-pip protobuf-compiler
+        sudo ln -sf /usr/bin/gdb-multiarch /usr/local/bin/arm-none-eabi-gdb || true
+        sudo ln -sf /usr/bin/gdb-multiarch /usr/local/bin/arm-none-eabi-gdb-py3 || true
+        pip3 install scons heatshrink2 pyserial pyelftools protobuf Pillow ansi colorlog oslex cxxheaderparser "setuptools<70"
+    - name: Apply PHANTOM patches
+      run: |
+        cd phantom-fw
+        sed -i 's/FIRMWARE_ORIGIN = "Unleashed"/FIRMWARE_ORIGIN = "PHANTOM"/' fbt_options.py
+        sed -i 's/DIST_SUFFIX = "local"/DIST_SUFFIX = "phantom-v0.1.0"/' fbt_options.py
+        cp ../patches/about.c applications/settings/about/about.c
+        mkdir -p applications/main/subghz/resources/subghz/assets
+        cp ../patches/setting_user applications/main/subghz/resources/subghz/assets/setting_user
+        python3 ../patches/generate_animations.py
+    - name: Build
+      run: |
+        cd phantom-fw
+        bash fbt COMPACT=1 DEBUG=0 DIST_SUFFIX=phantom-v0.1.0 updater_package
+    - uses: actions/upload-artifact@v4
+      with:
+        name: PHANTOM-Firmware-v0.1.0
+        path: phantom-fw/dist/**/*.tgz
+        retention-days: 30
